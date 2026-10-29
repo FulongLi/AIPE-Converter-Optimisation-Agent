@@ -65,17 +65,26 @@ def optimize_weighted(
     vol_max: float,
     x0: np.ndarray | None = None,
 ) -> ParetoPoint:
-    """Minimise ``w * P/loss_max + (1-w) * V/vol_max`` subject to box constraints."""
+    """Minimise ``w * P/loss_max + (1-w) * V/vol_max`` subject to box constraints.
+
+    ``x0`` is in physical units. Internally SLSQP works on each variable mapped to
+    ``[0, 1]`` within its bounds: the raw vector spans ~1e-5 m² to ~1e5 Hz, and with
+    unscaled finite-difference steps the optimiser never moves ``f_sw``.
+    """
 
     w = float(np.clip(pareto_weight, 0.0, 1.0))
     if w >= 1.0:
         w = 1.0 - 1e-9
-    bounds = [
-        (0.35 * p.area_swref, 4.5 * p.area_swref),
-        (p.min_frp, p.max_frp),
-        (p.min_Irp, p.max_Irp),
-        (1.0, p.chg_tempmax),
-    ]
+    bounds = np.array(
+        [
+            (0.35 * p.area_swref, 4.5 * p.area_swref),
+            (p.min_frp, p.max_frp),
+            (p.min_Irp, p.max_Irp),
+            (1.0, p.chg_tempmax),
+        ],
+        dtype=float,
+    )
+    lo, span = bounds[:, 0], bounds[:, 1] - bounds[:, 0]
     if x0 is None:
         x0 = np.array(
             [
@@ -86,24 +95,28 @@ def optimize_weighted(
             ],
             dtype=float,
         )
+    z0 = np.clip((np.asarray(x0, dtype=float) - lo) / span, 0.0, 1.0)
 
-    def objective(x: np.ndarray) -> float:
-        a, f, ir, dt = _pack(x)
+    def to_physical(z: np.ndarray) -> np.ndarray:
+        return lo + span * np.clip(z, 0.0, 1.0)
+
+    def objective(z: np.ndarray) -> float:
+        a, f, ir, dt = _pack(to_physical(z))
         pl = total_loss(p, a, f, ir, dt)
         vol = total_volume_m3(p, a, f, ir)
         return w * pl / loss_max + (1.0 - w) * vol / vol_max
 
     res = minimize(
         objective,
-        x0,
+        z0,
         method="SLSQP",
-        bounds=bounds,
-        options={"maxiter": 400, "ftol": 1e-9},
+        bounds=[(0.0, 1.0)] * 4,
+        options={"maxiter": 400, "ftol": 1e-12},
     )
     if not res.success:
         # Fall back to best-effort
         pass
-    a, f, ir, dt = _pack(res.x)
+    a, f, ir, dt = _pack(to_physical(res.x))
     (ps, pi, pc), (vs, vi, vc) = component_breakdown(p, a, f, ir, dt)
     return ParetoPoint(
         pareto_weight=w,
