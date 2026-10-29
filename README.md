@@ -23,6 +23,8 @@ cardiff-pareto --output-dir outputs
 
 Produces `pareto_efficiency_vs_power_density.png`, `pie_volume.png`, and `pie_loss.png`.
 
+SLSQP runs on the decision variables mapped to `[0, 1]` within their bounds, so the sweep moves all four together: from 300 kHz / ~96 cm³ / ~38 W at the volume-weighted end to 50 kHz / ~680 cm³ / ~10.5 W at the loss-weighted end. Without this scaling (raw SI units span about ten orders of magnitude) the finite-difference gradients never moved `f_sw` off its 175 kHz start value. `ΔT_j` settles at its lower bound because the heat sink is excluded from the volume (`include_heat_sink_volume=False`).
+
 ## Train ANN surrogate (Step 3 analogue)
 
 Runs a fresh Pareto sweep, saves `models/netdata.npz`, and trains an `sklearn` MLP (`15×12×10` hidden units, L2 `alpha=0.01`) with **Min–Max** scaling (MATLAB `mapminmax` analogue).
@@ -44,7 +46,7 @@ pytest
 |--------|------|
 | `parameters.py` | Constants from MATLAB `Step2.m` |
 | `physics.py` | Semiconductor, inductor, capacitor loss/volume |
-| `optimization.py` | Normalisation bounds + Pareto loop |
+| `optimization.py` | Objective normalisation, variable scaling + Pareto loop |
 | `cli.py` | Plotting and ANN training entry points |
 
 ## Note on fidelity
